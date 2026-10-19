@@ -167,3 +167,51 @@ def test_api_does_not_require_csrf(client):
     """JSON API не використовує куки сесії, тож токен там не потрібен."""
     r = client.post('/api/analyse', json={'text': 'Really good stuff here'})
     assert r.status_code in (200, 429)
+
+
+# ---------------------------------------------- лічильники частоти запитів
+def test_prune_removes_stale_keys():
+    """Застарілі записи мають зникати: інакше словник ріс би безмежно."""
+    import time as _t
+    from app import security
+    security._hits.clear()
+    security._hits['api:1.2.3.4'] = [_t.time() - 99999]   # давно протермінований
+    security._hits['api:5.6.7.8'] = [_t.time()]           # свіжий
+    security._prune(_t.time())
+    assert 'api:1.2.3.4' not in security._hits
+    assert 'api:5.6.7.8' in security._hits
+
+
+def test_too_many_does_not_record():
+    """Перевірка ліміту не має сама витрачати ліміт."""
+    from app import security
+    security._hits.clear()
+    for _ in range(50):
+        assert security.too_many('api:test', 5, 600) is False
+    assert security._hits.get('api:test', []) == []
+
+
+def test_successful_login_does_not_consume_limit(client, monkeypatch):
+    """Вдалий вхід не наближає користувача до блокування."""
+    from app import security
+    monkeypatch.setenv('ADMIN_TOKEN', 'tok')
+    security._hits.clear()
+    for _ in range(3):
+        r = post(client, '/login', password='tok')
+        assert r.status_code == 302
+    assert not any(k.startswith('login:') for k in security._hits)
+    with client.session_transaction() as sess:
+        sess.pop('is_admin', None)
+
+
+def test_failed_logins_eventually_block(client, monkeypatch):
+    from app import security
+    monkeypatch.setenv('ADMIN_TOKEN', 'tok')
+    monkeypatch.setattr(security, 'LOGIN_LIMIT', 3)
+    security._hits.clear()
+    for _ in range(3):
+        assert post(client, '/login', password='wrong').status_code == 200
+    assert post(client, '/login', password='wrong').status_code == 429
+    # навіть правильний пароль не приймається, поки діє блокування
+    assert post(client, '/login', password='tok').status_code == 429
+    security._hits.clear()

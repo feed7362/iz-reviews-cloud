@@ -4,7 +4,7 @@ from flask import (Blueprint, render_template, request, redirect, url_for,
                    flash, jsonify, abort, session)
 from . import db, ai
 from .security import (admin_required, rate_limited, check_password,
-                       login_rate_limited, safe_next)
+                       login_blocked, record_failed_login, safe_next)
 
 bp = Blueprint('main', __name__)
 
@@ -116,13 +116,17 @@ def analyse_all():
 
 
 @bp.route('/login', methods=['GET', 'POST'])
-@login_rate_limited
 def login():
     if request.method == 'POST':
+        # Ліміт рахує лише невдалі спроби - захист від перебору пароля.
+        if login_blocked():
+            flash('Забагато невдалих спроб входу. Спробуйте пізніше.', 'error')
+            return render_template('login.html'), 429
         if check_password(request.form.get('password', '')):
             session['is_admin'] = True
             flash('Вхід виконано.', 'ok')
             return redirect(safe_next(request.args.get('next')) or url_for('main.index'))
+        record_failed_login()
         flash('Невірний пароль.', 'error')
     return render_template('login.html')
 

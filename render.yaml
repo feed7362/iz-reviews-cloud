@@ -17,6 +17,12 @@ services:
         generateValue: true
       - key: HF_API_TOKEN
         sync: false        # задається вручну в налаштуваннях сервісу
+      - key: ADMIN_TOKEN
+        generateValue: true     # потрібен для дій, що змінюють дані
+      - key: BEHIND_PROXY
+        value: "1"              # Render працює за проксі: справжня IP клієнта
+      - key: FORCE_HTTPS
+        value: "1"              # куки сесії лише через HTTPS
       - key: PYTHON_VERSION
         value: 3.12.7
 

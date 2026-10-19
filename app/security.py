@@ -65,48 +65,82 @@ def validate_csrf():
 
 
 # ------------------------------------------------ IP-адреса та ліміти
+MAX_KEYS = int(os.environ.get('RATE_MAX_KEYS', '10000'))
+
+
 def client_ip():
     """IP клієнта.
 
     За довіреним проксі (Render, nginx) адресу підставляє ProxyFix у
     request.remote_addr. Заголовок X-Forwarded-For напряму НЕ читаємо:
     клієнт може надіслати будь-яке значення й обійти обмеження частоти.
+
+    Увага: якщо застосунок стоїть за проксі, але BEHIND_PROXY не ввімкнено,
+    remote_addr буде адресою проксі - спільною для всіх користувачів. Тоді
+    лічильники теж стануть спільними. Тому у хмарі BEHIND_PROXY=1 обов'язковий
+    (задано у render.yaml).
     """
     return request.remote_addr or 'unknown'
 
 
-def _too_many(key, limit, window):
-    now = time.time()
-    recent = [t for t in _hits[key] if now - t < window]
-    recent.append(now)
-    _hits[key] = recent
-    # прибираємо порожні записи, щоб словник не ріс безмежно
-    for k in [k for k, v in _hits.items() if not v]:
+def _prune(now):
+    """Прибирає застарілі записи за віком.
+
+    Раніше тут видалялися порожні списки, але вони не виникали ніколи:
+    запис завжди містив щонайменше одну свіжу мітку часу. Тому словник ріс
+    безмежно - по запису на кожну IP-адресу назавжди.
+    """
+    longest = max(RATE_WINDOW, LOGIN_WINDOW)
+    stale = [k for k, v in _hits.items() if not v or now - v[-1] > longest]
+    for k in stale:
         _hits.pop(k, None)
-    return len(recent) > limit
+    # страхувальний запобіжник, якщо записів усе одно забагато
+    if len(_hits) > MAX_KEYS:
+        for k in sorted(_hits, key=lambda k: _hits[k][-1])[:len(_hits) - MAX_KEYS]:
+            _hits.pop(k, None)
+
+
+def too_many(key, limit, window):
+    """Перевіряє ліміт, нічого не записуючи."""
+    now = time.time()
+    _prune(now)
+    recent = [t for t in _hits.get(key, []) if now - t < window]
+    if recent:
+        _hits[key] = recent
+    return len(recent) >= limit
+
+
+def record_attempt(key):
+    """Фіксує одну спробу."""
+    now = time.time()
+    _hits[key].append(now)
+    _prune(now)
 
 
 def rate_limited(view):
     """Обмежує частоту звернень з однієї IP-адреси."""
     @wraps(view)
     def wrapper(*args, **kwargs):
-        if _too_many('api:' + client_ip(), RATE_LIMIT, RATE_WINDOW):
+        key = 'api:' + client_ip()
+        if too_many(key, RATE_LIMIT, RATE_WINDOW):
             return jsonify({'error': 'Перевищено ліміт запитів, спробуйте пізніше',
                             'limit': RATE_LIMIT, 'window_seconds': RATE_WINDOW}), 429
+        record_attempt(key)
         return view(*args, **kwargs)
     return wrapper
 
 
-def login_rate_limited(view):
-    """Обмежує кількість спроб входу - захист від перебору пароля."""
-    @wraps(view)
-    def wrapper(*args, **kwargs):
-        if request.method == 'POST' and _too_many('login:' + client_ip(),
-                                                  LOGIN_LIMIT, LOGIN_WINDOW):
-            flash('Забагато спроб входу. Спробуйте пізніше.', 'error')
-            return redirect(url_for('main.index')), 429
-        return view(*args, **kwargs)
-    return wrapper
+def login_blocked():
+    """Чи вичерпано ліміт НЕВДАЛИХ спроб входу з цієї адреси.
+
+    Рахуємо лише невдалі спроби: інакше користувач, який просто кілька разів
+    заходив правильно, витрачав би власний ліміт.
+    """
+    return too_many('login:' + client_ip(), LOGIN_LIMIT, LOGIN_WINDOW)
+
+
+def record_failed_login():
+    record_attempt('login:' + client_ip())
 
 
 def admin_required(view):
