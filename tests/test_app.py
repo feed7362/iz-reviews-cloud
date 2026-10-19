@@ -174,32 +174,32 @@ def test_prune_removes_stale_keys():
     """Застарілі записи мають зникати: інакше словник ріс би безмежно."""
     import time as _t
     from app import security
-    security._hits.clear()
-    security._hits['api:1.2.3.4'] = [_t.time() - 99999]   # давно протермінований
-    security._hits['api:5.6.7.8'] = [_t.time()]           # свіжий
-    security._prune(_t.time())
-    assert 'api:1.2.3.4' not in security._hits
-    assert 'api:5.6.7.8' in security._hits
+    security._api_hits.clear()
+    security._api_hits['api:1.2.3.4'] = [_t.time() - 99999]   # протермінований
+    security._api_hits['api:5.6.7.8'] = [_t.time()]           # свіжий
+    security._prune(security._api_hits, security.RATE_WINDOW, _t.time())
+    assert 'api:1.2.3.4' not in security._api_hits
+    assert 'api:5.6.7.8' in security._api_hits
 
 
 def test_too_many_does_not_record():
     """Перевірка ліміту не має сама витрачати ліміт."""
     from app import security
-    security._hits.clear()
+    security._api_hits.clear()
     for _ in range(50):
         assert security.too_many('api:test', 5, 600) is False
-    assert security._hits.get('api:test', []) == []
+    assert security._api_hits.get('api:test', []) == []
 
 
 def test_successful_login_does_not_consume_limit(client, monkeypatch):
     """Вдалий вхід не наближає користувача до блокування."""
     from app import security
     monkeypatch.setenv('ADMIN_TOKEN', 'tok')
-    security._hits.clear()
+    security._login_hits.clear()
     for _ in range(3):
         r = post(client, '/login', password='tok')
         assert r.status_code == 302
-    assert not any(k.startswith('login:') for k in security._hits)
+    assert not security._login_hits
     with client.session_transaction() as sess:
         sess.pop('is_admin', None)
 
@@ -208,10 +208,45 @@ def test_failed_logins_eventually_block(client, monkeypatch):
     from app import security
     monkeypatch.setenv('ADMIN_TOKEN', 'tok')
     monkeypatch.setattr(security, 'LOGIN_LIMIT', 3)
-    security._hits.clear()
+    security._login_hits.clear()
     for _ in range(3):
         assert post(client, '/login', password='wrong').status_code == 200
     assert post(client, '/login', password='wrong').status_code == 429
     # навіть правильний пароль не приймається, поки діє блокування
     assert post(client, '/login', password='tok').status_code == 429
-    security._hits.clear()
+    security._login_hits.clear()
+
+
+def test_api_flood_cannot_evict_login_counter(client, monkeypatch):
+    """Потік запитів до API не має знімати блокування входу."""
+    from app import security
+    monkeypatch.setenv('ADMIN_TOKEN', 'tok')
+    monkeypatch.setattr(security, 'LOGIN_LIMIT', 2)
+    monkeypatch.setattr(security, 'MAX_KEYS', 5)
+    security._login_hits.clear()
+    security._api_hits.clear()
+    for _ in range(2):
+        post(client, '/login', password='wrong')
+    assert post(client, '/login', password='wrong').status_code == 429
+    # заповнюємо сховище API понад MAX_KEYS
+    import time as _t
+    for i in range(20):
+        security._api_hits['api:10.0.0.%d' % i] = [_t.time()]
+    assert post(client, '/login', password='wrong').status_code == 429
+    security._login_hits.clear()
+    security._api_hits.clear()
+
+
+def test_ipv6_addresses_share_a_64_bucket():
+    """Адреси однієї підмережі /64 мають потрапляти в один лічильник."""
+    from app.security import client_ip
+    from flask import Flask
+    app = Flask(__name__)
+    keys = set()
+    for suffix in ('1', '2', 'dead:beef'):
+        with app.test_request_context(environ_base={
+                'REMOTE_ADDR': '2001:db8:abcd:1234::' + suffix}):
+            keys.add(client_ip())
+    assert len(keys) == 1
+    with app.test_request_context(environ_base={'REMOTE_ADDR': '203.0.113.7'}):
+        assert client_ip() == '203.0.113.7'

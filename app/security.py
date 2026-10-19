@@ -4,6 +4,7 @@
 Застосунок розгортається у публічній хмарі, тому дії, які змінюють дані або
 витрачають квоту платного сервісу ШІ, не можуть бути доступні анонімно.
 """
+import ipaddress
 import os
 import secrets
 import time
@@ -16,7 +17,12 @@ from flask import session, request, redirect, url_for, flash, jsonify, abort
 
 # Проста пам'ять лічильників. Достатньо для одного процесу gunicorn;
 # для кількох робітників потрібне спільне сховище (наприклад Redis).
-_hits = defaultdict(list)
+#
+# Лічильники входу зберігаються ОКРЕМО від лічильників API: інакше потік
+# звернень до API міг би витіснити запис про невдалі входи й зняти блокування.
+_api_hits = defaultdict(list)
+_login_hits = defaultdict(list)
+_hits = _api_hits          # сумісність зі старими тестами
 
 RATE_LIMIT = int(os.environ.get('RATE_LIMIT', '20'))        # запитів
 RATE_WINDOW = int(os.environ.get('RATE_WINDOW', '600'))     # за секунд
@@ -69,63 +75,86 @@ MAX_KEYS = int(os.environ.get('RATE_MAX_KEYS', '10000'))
 
 
 def client_ip():
-    """IP клієнта.
+    """Ключ клієнта для лічильників.
 
-    За довіреним проксі (Render, nginx) адресу підставляє ProxyFix у
-    request.remote_addr. Заголовок X-Forwarded-For напряму НЕ читаємо:
-    клієнт може надіслати будь-яке значення й обійти обмеження частоти.
+    За довіреним проксі адресу підставляє ProxyFix у request.remote_addr.
+    Заголовок X-Forwarded-For напряму НЕ читаємо: клієнт може надіслати
+    будь-яке значення й обійти обмеження.
+
+    Адреси IPv6 групуються за префіксом /64, бо один господар зазвичай
+    розпоряджається цілою такою підмережею. Без цього досить було б міняти
+    адресу в межах власної /64, щоб щоразу діставати свіжий лічильник.
 
     Увага: якщо застосунок стоїть за проксі, але BEHIND_PROXY не ввімкнено,
-    remote_addr буде адресою проксі - спільною для всіх користувачів. Тоді
-    лічильники теж стануть спільними. Тому у хмарі BEHIND_PROXY=1 обов'язковий
-    (задано у render.yaml).
+    remote_addr буде адресою проксі - спільною для всіх користувачів. Тому
+    у хмарі BEHIND_PROXY=1 обов'язковий (задано у render.yaml).
     """
-    return request.remote_addr or 'unknown'
+    raw = request.remote_addr or 'unknown'
+    try:
+        addr = ipaddress.ip_address(raw)
+    except ValueError:
+        return raw
+    if addr.version == 6:
+        net = ipaddress.ip_network(f'{raw}/64', strict=False)
+        return str(net.network_address) + '/64'
+    return raw
 
 
-def _prune(now):
-    """Прибирає застарілі записи за віком.
+def _prune(store, window, now):
+    """Прибирає записи, старші за вікно.
 
-    Раніше тут видалялися порожні списки, але вони не виникали ніколи:
-    запис завжди містив щонайменше одну свіжу мітку часу. Тому словник ріс
-    безмежно - по запису на кожну IP-адресу назавжди.
+    Раніше тут видалялися порожні списки, яких ніколи не було: запис завжди
+    містив щонайменше одну свіжу мітку часу, тож словник ріс безмежно.
     """
-    longest = max(RATE_WINDOW, LOGIN_WINDOW)
-    stale = [k for k, v in _hits.items() if not v or now - v[-1] > longest]
+    stale = [k for k, v in store.items() if not v or now - v[-1] > window]
     for k in stale:
-        _hits.pop(k, None)
-    # страхувальний запобіжник, якщо записів усе одно забагато
-    if len(_hits) > MAX_KEYS:
-        for k in sorted(_hits, key=lambda k: _hits[k][-1])[:len(_hits) - MAX_KEYS]:
-            _hits.pop(k, None)
+        store.pop(k, None)
 
 
-def too_many(key, limit, window):
-    """Перевіряє ліміт, нічого не записуючи."""
+def _check(store, key, limit, window):
+    """Чи вичерпано ліміт. Нічого не записує.
+
+    Якщо сховище переповнене живими записами, новий ключ вважається
+    обмеженим (відмова на користь безпеки) - записи в межах вікна не
+    витісняються. Інакше зловмисник міг би заповнити сховище й у такий
+    спосіб скинути чужий (або власний) лічильник.
+    """
     now = time.time()
-    _prune(now)
-    recent = [t for t in _hits.get(key, []) if now - t < window]
+    _prune(store, window, now)
+    recent = [t for t in store.get(key, []) if now - t < window]
     if recent:
-        _hits[key] = recent
+        store[key] = recent
+    if key not in store and len(store) >= MAX_KEYS:
+        return True
     return len(recent) >= limit
 
 
-def record_attempt(key):
-    """Фіксує одну спробу."""
+def _record(store, key, window):
     now = time.time()
-    _hits[key].append(now)
-    _prune(now)
+    _prune(store, window, now)
+    if key not in store and len(store) >= MAX_KEYS:
+        return                      # сховище заповнене живими записами
+    store[key].append(now)
+
+
+def too_many(key, limit, window):
+    """Перевірка ліміту API (залишено для сумісності з тестами)."""
+    return _check(_api_hits, key, limit, window)
+
+
+def record_attempt(key):
+    _record(_api_hits, key, RATE_WINDOW)
 
 
 def rate_limited(view):
-    """Обмежує частоту звернень з однієї IP-адреси."""
+    """Обмежує частоту звернень з однієї адреси."""
     @wraps(view)
     def wrapper(*args, **kwargs):
         key = 'api:' + client_ip()
-        if too_many(key, RATE_LIMIT, RATE_WINDOW):
+        if _check(_api_hits, key, RATE_LIMIT, RATE_WINDOW):
             return jsonify({'error': 'Перевищено ліміт запитів, спробуйте пізніше',
                             'limit': RATE_LIMIT, 'window_seconds': RATE_WINDOW}), 429
-        record_attempt(key)
+        _record(_api_hits, key, RATE_WINDOW)
         return view(*args, **kwargs)
     return wrapper
 
@@ -136,11 +165,11 @@ def login_blocked():
     Рахуємо лише невдалі спроби: інакше користувач, який просто кілька разів
     заходив правильно, витрачав би власний ліміт.
     """
-    return too_many('login:' + client_ip(), LOGIN_LIMIT, LOGIN_WINDOW)
+    return _check(_login_hits, 'login:' + client_ip(), LOGIN_LIMIT, LOGIN_WINDOW)
 
 
 def record_failed_login():
-    record_attempt('login:' + client_ip())
+    _record(_login_hits, 'login:' + client_ip(), LOGIN_WINDOW)
 
 
 def admin_required(view):
