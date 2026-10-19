@@ -275,7 +275,7 @@ def test_eviction_keeps_blocked_keys(monkeypatch):
     for i in range(50):
         store['api:filler%d' % i] = [now]     # по одному зверненню
     security._evict(store, 5)
-    assert len(store) == 5
+    assert len(store) <= 5                    # витісняє із запасом
     assert 'api:attacker' in store            # збережено саме його
 
 
@@ -292,3 +292,36 @@ def test_admin_can_log_in_while_store_is_full(client, monkeypatch):
     with client.session_transaction() as sess:
         sess.pop('is_admin', None)
     security._login_hits.clear()
+
+
+def test_just_recorded_key_is_never_evicted():
+    """Щойно записаний ключ не має зникати одразу.
+
+    Інакше у заповненому сховищі невдалі спроби входу просто не рахувалися б,
+    і пароль можна було б підбирати без обмежень.
+    """
+    from app import security
+    import time as _t
+    now = _t.time()
+    store = security.defaultdict(list)
+    for i in range(50):
+        store['old%d' % i] = [now, now]       # по два звернення
+    security._record(store, 'new', 600, 5)    # новий ключ: одне звернення
+    assert 'new' in store
+
+
+def test_global_login_limit_survives_address_rotation(client, monkeypatch):
+    """Ротація адрес не обходить сукупний ліміт невдалих входів."""
+    from app import security
+    monkeypatch.setenv('ADMIN_TOKEN', 'tok')
+    monkeypatch.setattr(security, 'GLOBAL_LOGIN_LIMIT', 5)
+    security._login_hits.clear()
+    security._global.clear()
+    # кожна спроба - з «іншої» адреси, тож лічильник адреси завжди порожній
+    for i in range(5):
+        monkeypatch.setattr(security, 'client_ip', lambda i=i: '10.0.0.%d' % i)
+        assert post(client, '/login', password='wrong').status_code == 200
+    monkeypatch.setattr(security, 'client_ip', lambda: '10.0.0.99')
+    assert post(client, '/login', password='wrong').status_code == 429
+    security._login_hits.clear()
+    security._global.clear()

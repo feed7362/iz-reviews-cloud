@@ -4,6 +4,7 @@
 Застосунок розгортається у публічній хмарі, тому дії, які змінюють дані або
 витрачають квоту платного сервісу ШІ, не можуть бути доступні анонімно.
 """
+import heapq
 import ipaddress
 import os
 import secrets
@@ -23,6 +24,11 @@ from flask import session, request, redirect, url_for, flash, jsonify, abort
 _api_hits = defaultdict(list)
 _login_hits = defaultdict(list)
 _hits = _api_hits          # сумісність зі старими тестами
+
+# Глобальні лічильники - по одному на вид дії, незалежно від адреси.
+# Їх не можна ні витіснити, ні обійти зміною адреси, тому вони лишаються
+# останнім рубежем, коли зловмисник має багато адрес.
+_global = defaultdict(list)
 
 RATE_LIMIT = int(os.environ.get('RATE_LIMIT', '20'))        # запитів
 RATE_WINDOW = int(os.environ.get('RATE_WINDOW', '600'))     # за секунд
@@ -73,6 +79,8 @@ def validate_csrf():
 # ------------------------------------------------ IP-адреса та ліміти
 MAX_KEYS = int(os.environ.get('RATE_MAX_KEYS', '10000'))
 LOGIN_MAX_KEYS = int(os.environ.get('LOGIN_MAX_KEYS', '2000'))
+GLOBAL_LOGIN_LIMIT = int(os.environ.get('GLOBAL_LOGIN_LIMIT', '100'))
+GLOBAL_RATE_LIMIT = int(os.environ.get('GLOBAL_RATE_LIMIT', '500'))
 
 
 def client_ip():
@@ -112,22 +120,43 @@ def _prune(store, window, now):
         store.pop(k, None)
 
 
-def _evict(store, cap):
+def _evict(store, cap, protect=None):
     """Звільняє місце, витісняючи записи з НАЙМЕНШОЮ кількістю звернень.
 
-    Відмовляти новим ключам при переповненні не можна: тоді зловмисник,
-    заповнивши сховище, заблокував би вхід усім, зокрема адміністраторові.
-    Але й витісняти будь-що підряд не можна: так знімалося б чуже блокування.
-
-    Компроміс: першими зникають записи з найменшою кількістю звернень. Той,
-    хто вичерпав ліміт, має їх найбільше, тому витісняється останнім, а
-    одноразові записи, якими заповнюють сховище, зникають першими.
+    Три правила, кожне з яких закриває конкретну діру:
+      * щойно записаний ключ (protect) не витісняється ніколи - інакше у
+        заповненому сховищі новий запис зникав би одразу, і невдалі спроби
+        входу просто не рахувалися б;
+      * першими зникають записи з найменшою кількістю звернень, тож той, хто
+        вичерпав ліміт, лишається довше за одноразові записи-заповнювачі;
+      * витісняємо з запасом (до 90% місткості), щоб не виконувати відбір на
+        кожному запиті.
     """
     if len(store) <= cap:
         return
-    order = sorted(store, key=lambda k: (len(store[k]), store[k][-1]))
-    for k in order[:len(store) - cap]:
+    target = max(1, int(cap * 0.9))
+    surplus = len(store) - target
+    candidates = [k for k in store if k != protect]
+    for k in heapq.nsmallest(surplus, candidates,
+                             key=lambda k: (len(store[k]), store[k][-1])):
         store.pop(k, None)
+
+
+def _global_blocked(kind, limit, window):
+    """Сукупний ліміт для всіх адрес разом.
+
+    Лічильники на кожну адресу можна обійти, маючи багато адрес (наприклад
+    цілу підмережу IPv6). Цей лічильник один на весь застосунок, тому ротація
+    адрес на нього не впливає.
+    """
+    now = time.time()
+    recent = [t for t in _global[kind] if now - t < window]
+    _global[kind] = recent
+    return len(recent) >= limit
+
+
+def _global_record(kind):
+    _global[kind].append(time.time())
 
 
 def _check(store, key, limit, window):
@@ -144,7 +173,7 @@ def _record(store, key, window, cap):
     now = time.time()
     _prune(store, window, now)
     store[key].append(now)
-    _evict(store, cap)
+    _evict(store, cap, protect=key)
 
 
 def too_many(key, limit, window):
@@ -161,20 +190,25 @@ def rate_limited(view):
     @wraps(view)
     def wrapper(*args, **kwargs):
         key = 'api:' + client_ip()
-        if _check(_api_hits, key, RATE_LIMIT, RATE_WINDOW):
+        if (_global_blocked('api', GLOBAL_RATE_LIMIT, RATE_WINDOW)
+                or _check(_api_hits, key, RATE_LIMIT, RATE_WINDOW)):
             return jsonify({'error': 'Перевищено ліміт запитів, спробуйте пізніше',
                             'limit': RATE_LIMIT, 'window_seconds': RATE_WINDOW}), 429
         _record(_api_hits, key, RATE_WINDOW, MAX_KEYS)
+        _global_record('api')
         return view(*args, **kwargs)
     return wrapper
 
 
 def login_blocked():
-    """Чи вичерпано ліміт НЕВДАЛИХ спроб входу з цієї адреси.
+    """Чи вичерпано ліміт НЕВДАЛИХ спроб входу.
 
     Рахуємо лише невдалі спроби: інакше користувач, який просто кілька разів
-    заходив правильно, витрачав би власний ліміт.
+    заходив правильно, витрачав би власний ліміт. Перевіряються два рубежі:
+    ліміт цієї адреси та сукупний ліміт на весь застосунок.
     """
+    if _global_blocked('login', GLOBAL_LOGIN_LIMIT, LOGIN_WINDOW):
+        return True
     return _check(_login_hits, 'login:' + client_ip(), LOGIN_LIMIT, LOGIN_WINDOW)
 
 
@@ -182,6 +216,7 @@ def record_failed_login():
     # Окремий, менший ліміт обсягу: невдалі входи - рідкісна подія, тож
     # сховище лічильників входу не має конкурувати за місце з трафіком API.
     _record(_login_hits, 'login:' + client_ip(), LOGIN_WINDOW, LOGIN_MAX_KEYS)
+    _global_record('login')
 
 
 def admin_required(view):
