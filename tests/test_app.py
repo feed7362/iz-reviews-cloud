@@ -318,10 +318,47 @@ def test_global_login_limit_survives_address_rotation(client, monkeypatch):
     security._login_hits.clear()
     security._global.clear()
     # кожна спроба - з «іншої» адреси, тож лічильник адреси завжди порожній
-    for i in range(5):
+    for i in range(4):
         monkeypatch.setattr(security, 'client_ip', lambda i=i: '10.0.0.%d' % i)
         assert post(client, '/login', password='wrong').status_code == 200
     monkeypatch.setattr(security, 'client_ip', lambda: '10.0.0.99')
     assert post(client, '/login', password='wrong').status_code == 429
     security._login_hits.clear()
     security._global.clear()
+
+
+def test_correct_password_works_under_global_pressure(client, monkeypatch):
+    """Сукупний ліміт не має позбавляти доступу самого адміністратора.
+
+    Інакше зловмисник, нагенерувавши невдалих спроб з різних адрес, зачиняв
+    би двері господареві - гірше за підбір, який ми зупиняємо.
+    """
+    import time as _t
+    from app import security
+    monkeypatch.setenv('ADMIN_TOKEN', 'tok')
+    monkeypatch.setattr(security, 'GLOBAL_LOGIN_LIMIT', 3)
+    security._login_hits.clear()
+    security._global.clear()
+    security._global['login'] = [_t.time()] * 50      # масовий тиск ззовні
+    monkeypatch.setattr(security, 'client_ip', lambda: '198.51.100.7')
+    # невдала спроба відхиляється...
+    assert post(client, '/login', password='wrong').status_code == 429
+    # ...але правильний пароль усе одно приймається
+    assert post(client, '/login', password='tok').status_code == 302
+    with client.session_transaction() as sess:
+        sess.pop('is_admin', None)
+    security._login_hits.clear()
+    security._global.clear()
+
+
+def test_ai_falls_back_to_local_when_budget_exceeded(monkeypatch):
+    """Вичерпаний бюджет хмарного ШІ не відмовляє, а вмикає локальну модель."""
+    from app import ai
+    monkeypatch.setenv('HF_API_TOKEN', 'fake-token')
+    called = []
+    monkeypatch.setattr(ai, 'analyse_hf', lambda t: called.append(t) or
+                        {'sentiment': 'positive', 'confidence': 1.0, 'model': 'cloud'})
+    res = ai.analyse('A wonderful and delightful product', allow_cloud=False)
+    assert called == []                      # хмарний сервіс не викликався
+    assert res['model'].startswith('local:')
+    assert res['sentiment'] in {'positive', 'negative'}

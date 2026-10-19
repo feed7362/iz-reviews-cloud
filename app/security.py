@@ -190,8 +190,10 @@ def rate_limited(view):
     @wraps(view)
     def wrapper(*args, **kwargs):
         key = 'api:' + client_ip()
-        if (_global_blocked('api', GLOBAL_RATE_LIMIT, RATE_WINDOW)
-                or _check(_api_hits, key, RATE_LIMIT, RATE_WINDOW)):
+        # Відмовляє лише власний ліміт адреси. Сукупний ліміт не відмовляє
+        # нікому - він перемикає застосунок на локальну модель (див.
+        # ai_budget_exceeded), щоб один активний клієнт не зупиняв сервіс усім.
+        if _check(_api_hits, key, RATE_LIMIT, RATE_WINDOW):
             return jsonify({'error': 'Перевищено ліміт запитів, спробуйте пізніше',
                             'limit': RATE_LIMIT, 'window_seconds': RATE_WINDOW}), 429
         _record(_api_hits, key, RATE_WINDOW, MAX_KEYS)
@@ -201,15 +203,34 @@ def rate_limited(view):
 
 
 def login_blocked():
-    """Чи вичерпано ліміт НЕВДАЛИХ спроб входу.
+    """Чи вичерпано ліміт невдалих спроб входу з ЦІЄЇ адреси.
 
     Рахуємо лише невдалі спроби: інакше користувач, який просто кілька разів
-    заходив правильно, витрачав би власний ліміт. Перевіряються два рубежі:
-    ліміт цієї адреси та сукупний ліміт на весь застосунок.
+    заходив правильно, витрачав би власний ліміт.
     """
-    if _global_blocked('login', GLOBAL_LOGIN_LIMIT, LOGIN_WINDOW):
-        return True
     return _check(_login_hits, 'login:' + client_ip(), LOGIN_LIMIT, LOGIN_WINDOW)
+
+
+def login_under_pressure():
+    """Чи перевищено СУКУПНУ кількість невдалих входів по всьому застосунку.
+
+    Цей стан НЕ відмовляє у вході наосліп: правильний пароль приймається
+    завжди. Інакше зловмисник, нагенерувавши невдалих спроб з різних адрес,
+    позбавив би доступу самого адміністратора - а це гірше за підбір, який
+    ми намагаємося зупинити. Натомість невдалі спроби у цьому стані
+    відхиляються і додатково сповільнюються.
+    """
+    return _global_blocked('login', GLOBAL_LOGIN_LIMIT, LOGIN_WINDOW)
+
+
+def ai_budget_exceeded():
+    """Чи вичерпано сукупний бюджет звернень до хмарного сервісу ШІ.
+
+    Теж не відмова: застосунок просто переходить на безкоштовну локальну
+    модель, щоб не витрачати квоту платного API. Користувач результат
+    отримує - лише іншою моделлю, про що видно в інтерфейсі.
+    """
+    return _global_blocked('api', GLOBAL_RATE_LIMIT, RATE_WINDOW)
 
 
 def record_failed_login():

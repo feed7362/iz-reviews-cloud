@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 """Маршрути вебзастосунку: обробка запитів користувачів."""
+import time
+
 from flask import (Blueprint, render_template, request, redirect, url_for,
                    flash, jsonify, abort, session)
 from . import db, ai
 from .security import (admin_required, rate_limited, check_password,
-                       login_blocked, record_failed_login, safe_next)
+                       login_blocked, login_under_pressure, record_failed_login,
+                       ai_budget_exceeded, safe_next)
 
 bp = Blueprint('main', __name__)
 
@@ -63,7 +66,7 @@ def new_review():
 
         # ІЗ2: одразу після збереження відгук аналізується модулем ШІ
         if f.get('analyse'):
-            res = ai.analyse(body)
+            res = ai.analyse(body, allow_cloud=not ai_budget_exceeded())
             db.save_analysis(review['id'], res['sentiment'], res['confidence'], res['model'])
 
         flash('Відгук збережено.', 'ok')
@@ -97,7 +100,7 @@ def analyse_review(review_id):
     review = db.get_review(review_id)
     if not review:
         abort(404)
-    res = ai.analyse(review['body'])
+    res = ai.analyse(review['body'], allow_cloud=not ai_budget_exceeded())
     db.save_analysis(review_id, res['sentiment'], res['confidence'], res['model'])
     flash('Аналіз виконано: %s (%.2f) - %s'
           % (res['sentiment'], res['confidence'], res['model']), 'ok')
@@ -109,7 +112,7 @@ def analyse_review(review_id):
 def analyse_all():
     pending = db.unanalysed_reviews()
     for row in pending:
-        res = ai.analyse(row['body'])
+        res = ai.analyse(row['body'], allow_cloud=not ai_budget_exceeded())
         db.save_analysis(row['id'], res['sentiment'], res['confidence'], res['model'])
     flash('Проаналізовано відгуків: %d' % len(pending), 'ok')
     return redirect(url_for('main.dashboard'))
@@ -118,15 +121,25 @@ def analyse_all():
 @bp.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        # Ліміт рахує лише невдалі спроби - захист від перебору пароля.
+        # Ліміт цієї адреси - захист від перебору пароля саме з неї.
         if login_blocked():
             flash('Забагато невдалих спроб входу. Спробуйте пізніше.', 'error')
             return render_template('login.html'), 429
-        if check_password(request.form.get('password', '')):
+
+        # Сукупний ліміт НЕ відмовляє наосліп: пароль перевіряється завжди,
+        # тож адміністратор увійде навіть тоді, коли хтось нагенерував
+        # невдалих спроб з інших адрес. Відхиляються лише невдалі спроби.
+        correct = check_password(request.form.get('password', ''))
+        if correct:
             session['is_admin'] = True
             flash('Вхід виконано.', 'ok')
             return redirect(safe_next(request.args.get('next')) or url_for('main.index'))
+
         record_failed_login()
+        if login_under_pressure():
+            time.sleep(1.0)        # сповільнюємо підбір під час масових спроб
+            flash('Забагато невдалих спроб входу. Спробуйте пізніше.', 'error')
+            return render_template('login.html'), 429
         flash('Невірний пароль.', 'error')
     return render_template('login.html')
 
@@ -152,7 +165,7 @@ def api_analyse():
     text = (data.get('text') or '').strip()
     if len(text) < 3:
         return jsonify({'error': 'Поле text має містити щонайменше 3 символи'}), 400
-    return jsonify(ai.analyse(text))
+    return jsonify(ai.analyse(text, allow_cloud=not ai_budget_exceeded()))
 
 
 @bp.route('/api/stats')

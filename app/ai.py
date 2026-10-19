@@ -64,9 +64,18 @@ def analyse_hf(text):
         return None
 
 
-def analyse(text):
-    """Аналіз тональності: спершу хмарний сервіс, за потреби - власна модель."""
-    return analyse_hf(text) or analyse_local(text)
+def analyse(text, allow_cloud=True):
+    """Аналіз тональності: спершу хмарний сервіс, за потреби - власна модель.
+
+    allow_cloud=False змушує одразу використати локальну модель. Так
+    застосунок поводиться, коли вичерпано сукупний бюджет звернень до
+    платного API: результат усе одно надається, лише дешевшою моделлю.
+    """
+    if allow_cloud:
+        result = analyse_hf(text)
+        if result:
+            return result
+    return analyse_local(text)
 
 
 def service_status():
