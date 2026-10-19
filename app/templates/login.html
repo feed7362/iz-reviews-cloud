@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block title %}Вхід адміністратора — {{ app_title }}{% endblock %}
+{% block content %}
+
+<h1>Вхід адміністратора</h1>
+
+<form class="card form" method="post">
+    <p class="muted">Дії, що змінюють дані (видалення відгуків, масовий аналіз),
+        доступні лише адміністратору.</p>
+    <div class="row">
+        <label for="password">Пароль</label>
+        <input id="password" name="password" type="password" required autofocus>
+    </div>
+    <button class="primary" type="submit">Увійти</button>
+</form>
+
+{% endblock %}

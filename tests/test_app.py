@@ -77,3 +77,46 @@ def test_dsn_requires_env(monkeypatch):
     monkeypatch.delenv('DATABASE_URL', raising=False)
     with pytest.raises(RuntimeError):
         db.dsn()
+
+
+# ------------------------------------------------------------ безпека
+def test_mask_email():
+    from app.security import mask_email
+    assert mask_email('olena@example.com') == 'o***@example.com'
+    assert mask_email('') == ''
+    assert mask_email('not-an-email') == 'not-an-email'
+
+
+def test_delete_requires_admin(client):
+    """Видалення відгуку анонімним користувачем має бути заборонене."""
+    r = client.post('/review/1/delete')
+    assert r.status_code == 403
+
+
+def test_analyse_all_requires_admin(client):
+    r = client.post('/analyse-all')
+    assert r.status_code == 403
+
+
+def test_login_rejects_wrong_password(client, monkeypatch):
+    monkeypatch.setenv('ADMIN_TOKEN', 'correct-token')
+    r = client.post('/login', data={'password': 'wrong'})
+    assert r.status_code == 200          # лишаємось на сторінці входу
+    with client.session_transaction() as sess:
+        assert not sess.get('is_admin')
+
+
+def test_login_accepts_correct_password(client, monkeypatch):
+    monkeypatch.setenv('ADMIN_TOKEN', 'correct-token')
+    r = client.post('/login', data={'password': 'correct-token'})
+    assert r.status_code == 302
+    with client.session_transaction() as sess:
+        assert sess.get('is_admin') is True
+        sess.pop('is_admin', None)
+
+
+def test_admin_disabled_without_token(client, monkeypatch):
+    """Якщо ADMIN_TOKEN не заданий, вхід неможливий, а дії заблоковано."""
+    monkeypatch.delenv('ADMIN_TOKEN', raising=False)
+    assert client.post('/login', data={'password': ''}).status_code == 200
+    assert client.post('/review/1/delete').status_code == 403

@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """Маршрути вебзастосунку: обробка запитів користувачів."""
 from flask import (Blueprint, render_template, request, redirect, url_for,
-                   flash, jsonify, abort)
+                   flash, jsonify, abort, session)
 from . import db, ai
+from .security import admin_required, rate_limited, check_password
 
 bp = Blueprint('main', __name__)
 
@@ -79,6 +80,7 @@ def review_detail(review_id):
 
 
 @bp.route('/review/<int:review_id>/delete', methods=['POST'])
+@admin_required
 def remove_review(review_id):
     if not db.get_review(review_id):
         abort(404)
@@ -89,6 +91,7 @@ def remove_review(review_id):
 
 # ------------------------------------------------------- ІЗ2: модуль ШІ
 @bp.route('/review/<int:review_id>/analyse', methods=['POST'])
+@rate_limited
 def analyse_review(review_id):
     review = db.get_review(review_id)
     if not review:
@@ -101,6 +104,7 @@ def analyse_review(review_id):
 
 
 @bp.route('/analyse-all', methods=['POST'])
+@admin_required
 def analyse_all():
     pending = db.unanalysed_reviews()
     for row in pending:
@@ -110,6 +114,24 @@ def analyse_all():
     return redirect(url_for('main.dashboard'))
 
 
+@bp.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        if check_password(request.form.get('password', '')):
+            session['is_admin'] = True
+            flash('Вхід виконано.', 'ok')
+            return redirect(request.args.get('next') or url_for('main.index'))
+        flash('Невірний пароль.', 'error')
+    return render_template('login.html')
+
+
+@bp.route('/logout', methods=['POST'])
+def logout():
+    session.pop('is_admin', None)
+    flash('Вихід виконано.', 'ok')
+    return redirect(url_for('main.index'))
+
+
 @bp.route('/dashboard')
 def dashboard():
     return render_template('dashboard.html', s=db.stats(), ai_status=ai.service_status())
@@ -117,6 +139,7 @@ def dashboard():
 
 # ------------------------------------------------------------------- API
 @bp.route('/api/analyse', methods=['POST'])
+@rate_limited
 def api_analyse():
     """Аналіз довільного тексту без збереження - для перевірки модуля ШІ."""
     data = request.get_json(silent=True) or {}

@@ -58,10 +58,16 @@ def execute(sql, params=None, returning=False):
 
 # ----------------------------------------------------------------- користувачі
 def upsert_user(name, email):
-    """Повертає користувача за email, створюючи його за потреби."""
+    """Повертає користувача за email, створюючи його за потреби.
+
+    Ім'я існуючого користувача НЕ перезаписується: форма анонімна, тож інакше
+    будь-хто міг би змінити ім'я чужого облікового запису, вказавши його пошту.
+    Конструкція DO UPDATE SET email = EXCLUDED.email - навмисна «порожня»
+    зміна, потрібна лише щоб RETURNING повернув наявний рядок.
+    """
     return execute(
         """INSERT INTO users (name, email) VALUES (%s, %s)
-           ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
+           ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
            RETURNING id, name, email""",
         (name.strip(), email.strip().lower()), returning=True)
 

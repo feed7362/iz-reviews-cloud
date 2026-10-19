@@ -14,10 +14,12 @@ def create_app():
     app.config['JSON_AS_ASCII'] = False
 
     from . import routes
+    from .security import mask_email, is_admin
     app.register_blueprint(routes.bp)
+    app.jinja_env.filters['mask_email'] = mask_email
 
     @app.context_processor
     def inject():
-        return {'app_title': 'Аналіз відгуків'}
+        return {'app_title': 'Аналіз відгуків', 'is_admin': is_admin()}
 
     return app

@@ -7,7 +7,7 @@
 <article class="card">
     <h1>{{ r.product }}</h1>
     <p class="muted">
-        {{ r.category }} · {{ r.user_name }} ({{ r.email }}) ·
+        {{ r.category }} · {{ r.user_name }} ({{ r.email|mask_email }}) ·
         оцінка {{ r.rating }}/5 · {{ r.created_at.strftime('%d.%m.%Y %H:%M') }}
     </p>
     <p class="body">{{ r.body }}</p>
@@ -31,10 +31,12 @@
                 {% if r.sentiment %}Проаналізувати повторно{% else %}Проаналізувати{% endif %}
             </button>
         </form>
+        {% if is_admin %}
         <form method="post" action="{{ url_for('main.remove_review', review_id=r.id) }}"
               onsubmit="return confirm('Видалити відгук #{{ r.id }}?');">
             <button class="danger" type="submit">Видалити</button>
         </form>
+        {% endif %}
     </div>
 </article>
 

@@ -26,6 +26,13 @@ body {
 }
 .site-header nav a:hover { background-color: #3f7cc4; color: #fff; }
 
+.inline-form { display: inline; }
+.link-btn {
+    background: none; color: #d9e7f8; font-weight: 600; font-size: 16px;
+    padding: 6px 10px; border-radius: 4px;
+}
+.link-btn:hover { background-color: #3f7cc4; color: #fff; }
+
 .content { margin: 26px auto 40px; }
 
 h1 { font-size: 26px; color: #1d3a63; margin-bottom: 16px; }

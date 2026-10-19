@@ -28,9 +28,13 @@
         <p class="muted">Ще немає проаналізованих відгуків.</p>
     {% endif %}
 
+    {% if is_admin %}
     <form method="post" action="{{ url_for('main.analyse_all') }}">
         <button class="primary" type="submit">Проаналізувати всі нові відгуки</button>
     </form>
+    {% else %}
+    <p class="muted">Масовий аналіз доступний після входу адміністратора.</p>
+    {% endif %}
 </section>
 
 <section class="card">

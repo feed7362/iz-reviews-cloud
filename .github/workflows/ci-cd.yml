@@ -65,7 +65,7 @@ jobs:
             curl -sf http://127.0.0.1:8000/health && break || sleep 2
           done
           curl -sf http://127.0.0.1:8000/health | tee /tmp/health.json
-          grep -q '"database": "ok"' /tmp/health.json
+          grep -qE '"database": ?"ok"' /tmp/health.json
           kill "$(cat /tmp/gunicorn.pid)"
 
   deploy:
