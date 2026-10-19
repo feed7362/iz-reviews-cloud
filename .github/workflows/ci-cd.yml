@@ -1,0 +1,86 @@
+name: CI/CD
+
+# Індивідуальне завдання 2: автоматична перевірка та розгортання застосунку.
+#   push у main          -> тести, перевірка стилю, розгортання
+#   pull request у main  -> лише тести та перевірка стилю (без розгортання)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Тести та перевірка стилю
+    runs-on: ubuntu-latest
+
+    # Справжня база даних для перевірки схеми у конвеєрі
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: izuser
+          POSTGRES_PASSWORD: izpass
+          POSTGRES_DB: reviews
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://izuser:izpass@localhost:5432/reviews
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Встановити Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Встановити залежності
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest flake8
+
+      - name: Перевірка стилю коду
+        run: flake8 app tests scripts --max-line-length=100 --extend-ignore=E402
+
+      - name: Застосувати схему бази даних
+        run: python -c "from app.db import init_schema; init_schema()"
+
+      - name: Запустити тести
+        run: pytest tests/ -v
+
+      - name: Перевірити, що застосунок стартує
+        run: |
+          gunicorn wsgi:app --bind 127.0.0.1:8000 --daemon --pid /tmp/gunicorn.pid
+          for i in $(seq 1 20); do
+            curl -sf http://127.0.0.1:8000/health && break || sleep 2
+          done
+          curl -sf http://127.0.0.1:8000/health | tee /tmp/health.json
+          grep -q '"database": "ok"' /tmp/health.json
+          kill "$(cat /tmp/gunicorn.pid)"
+
+  deploy:
+    name: Розгортання у хмарі
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Запустити розгортання на Render
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK" ]; then
+            echo "::warning::Секрет RENDER_DEPLOY_HOOK не задано - розгортання пропущено"
+            exit 0
+          fi
+          curl -sf -X POST "$RENDER_DEPLOY_HOOK"
+          echo "Розгортання запущено"

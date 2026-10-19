@@ -1,0 +1,63 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<h1>Відгуки користувачів</h1>
+
+<form class="filters" method="get">
+    <label>Категорія
+        <select name="category">
+            <option value="">усі</option>
+            {% for c in categories %}
+                <option value="{{ c.id }}" {% if sel_category == c.id %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    <label>Тональність
+        <select name="sentiment">
+            <option value="">будь-яка</option>
+            <option value="positive" {% if sel_sentiment == 'positive' %}selected{% endif %}>позитивна</option>
+            <option value="negative" {% if sel_sentiment == 'negative' %}selected{% endif %}>негативна</option>
+            <option value="none" {% if sel_sentiment == 'none' %}selected{% endif %}>не проаналізовані</option>
+        </select>
+    </label>
+    <button type="submit">Застосувати</button>
+    <a class="btn-link" href="{{ url_for('main.index') }}">Скинути</a>
+</form>
+
+{% if reviews %}
+<table class="grid">
+    <thead>
+    <tr>
+        <th>#</th><th>Товар</th><th>Категорія</th><th>Автор</th>
+        <th>Оцінка</th><th>Тональність</th><th>Дата</th><th></th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for r in reviews %}
+        <tr>
+            <td>{{ r.id }}</td>
+            <td>{{ r.product }}</td>
+            <td>{{ r.category }}</td>
+            <td>{{ r.user_name }}</td>
+            <td class="center">{{ r.rating }}/5</td>
+            <td>
+                {% if r.sentiment %}
+                    <span class="tag tag-{{ r.sentiment }}">{{ r.sentiment }}</span>
+                    <span class="muted">{{ '%.2f'|format(r.confidence) }}</span>
+                {% else %}
+                    <span class="muted">—</span>
+                {% endif %}
+            </td>
+            <td class="muted">{{ r.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+            <td><a href="{{ url_for('main.review_detail', review_id=r.id) }}">детальніше</a></td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+<p class="muted">Показано записів: {{ reviews|length }}</p>
+{% else %}
+<p class="empty">Відгуків за вибраними умовами немає.
+    <a href="{{ url_for('main.new_review') }}">Додати перший</a>.</p>
+{% endif %}
+
+{% endblock %}

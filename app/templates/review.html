@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% block title %}Відгук #{{ r.id }} — {{ app_title }}{% endblock %}
+{% block content %}
+
+<p><a href="{{ url_for('main.index') }}">← до списку відгуків</a></p>
+
+<article class="card">
+    <h1>{{ r.product }}</h1>
+    <p class="muted">
+        {{ r.category }} · {{ r.user_name }} ({{ r.email }}) ·
+        оцінка {{ r.rating }}/5 · {{ r.created_at.strftime('%d.%m.%Y %H:%M') }}
+    </p>
+    <p class="body">{{ r.body }}</p>
+
+    <h2>Результат аналізу тональності</h2>
+    {% if r.sentiment %}
+        <table class="props">
+            <tr><th>Тональність</th>
+                <td><span class="tag tag-{{ r.sentiment }}">{{ r.sentiment }}</span></td></tr>
+            <tr><th>Впевненість</th><td>{{ '%.4f'|format(r.confidence) }}</td></tr>
+            <tr><th>Модель</th><td>{{ r.model_name }}</td></tr>
+            <tr><th>Час аналізу</th><td>{{ r.analyzed_at.strftime('%d.%m.%Y %H:%M:%S') }}</td></tr>
+        </table>
+    {% else %}
+        <p class="muted">Відгук ще не проаналізовано.</p>
+    {% endif %}
+
+    <div class="actions">
+        <form method="post" action="{{ url_for('main.analyse_review', review_id=r.id) }}">
+            <button class="primary" type="submit">
+                {% if r.sentiment %}Проаналізувати повторно{% else %}Проаналізувати{% endif %}
+            </button>
+        </form>
+        <form method="post" action="{{ url_for('main.remove_review', review_id=r.id) }}"
+              onsubmit="return confirm('Видалити відгук #{{ r.id }}?');">
+            <button class="danger" type="submit">Видалити</button>
+        </form>
+    </div>
+</article>
+
+{% endblock %}

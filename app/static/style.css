@@ -1,0 +1,120 @@
+/* Вебзастосунок «Аналіз відгуків» — індивідуальне завдання */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: "Segoe UI", Verdana, sans-serif;
+    background-color: #f4f6f9;
+    color: #22262c;
+    line-height: 1.6;
+}
+
+.wrap { max-width: 1040px; margin: 0 auto; padding: 0 18px; }
+
+/* ---------- шапка ---------- */
+.site-header {
+    background: linear-gradient(120deg, #1d3a63 0%, #2f66a8 100%);
+    color: #fff;
+    padding: 16px 0;
+}
+.header-inner { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.logo { font-size: 22px; font-weight: 700; color: #fff; text-decoration: none; }
+.logo span { color: #8fc0f0; }
+.site-header nav a {
+    color: #d9e7f8; text-decoration: none; font-weight: 600;
+    margin-left: 18px; padding: 6px 10px; border-radius: 4px;
+}
+.site-header nav a:hover { background-color: #3f7cc4; color: #fff; }
+
+.content { margin: 26px auto 40px; }
+
+h1 { font-size: 26px; color: #1d3a63; margin-bottom: 16px; }
+h2 { font-size: 19px; color: #1d3a63; margin: 18px 0 10px; }
+
+/* ---------- повідомлення ---------- */
+.flashes { margin-bottom: 16px; }
+.flash { padding: 10px 14px; border-radius: 6px; margin-bottom: 8px; font-size: 15px; }
+.flash-ok { background-color: #e3f3e6; border: 1px solid #a8d7b4; color: #1d5b2c; }
+.flash-error { background-color: #fdeaea; border: 1px solid #efb4b4; color: #8c2020; }
+
+/* ---------- картки ---------- */
+.card {
+    background-color: #fff; border: 1px solid #dde3ea; border-radius: 8px;
+    padding: 20px 24px; margin-bottom: 20px;
+}
+
+/* ---------- форми ---------- */
+.filters {
+    display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap;
+    background-color: #fff; border: 1px solid #dde3ea; border-radius: 8px;
+    padding: 14px 18px; margin-bottom: 18px;
+}
+.filters label { display: flex; flex-direction: column; font-size: 13px; color: #55616f; gap: 4px; }
+
+.form { max-width: 620px; }
+.row { margin-bottom: 14px; }
+.row label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 5px; }
+.row-check { display: flex; align-items: center; gap: 8px; }
+.row-check label { margin-bottom: 0; font-weight: 400; }
+
+input[type=text], input[type=email], select, textarea {
+    width: 100%; border: 1px solid #c4ced9; border-radius: 5px;
+    padding: 9px 11px; font-family: inherit; font-size: 15px; background-color: #fcfdfe;
+}
+.filters select { width: auto; min-width: 150px; }
+input:focus, select:focus, textarea:focus { outline: none; border-color: #2f66a8; background-color: #fff; }
+
+button {
+    border: none; border-radius: 5px; font-size: 15px; font-weight: 600;
+    padding: 9px 20px; cursor: pointer; background-color: #e4e9f0; color: #22262c;
+}
+button:hover { background-color: #d5dde8; }
+button.primary { background-color: #2f66a8; color: #fff; }
+button.primary:hover { background-color: #24528a; }
+button.danger { background-color: #c0392b; color: #fff; }
+button.danger:hover { background-color: #9c2d22; }
+.btn-link { color: #2f66a8; font-size: 14px; }
+.actions { display: flex; gap: 10px; margin-top: 16px; }
+
+/* ---------- таблиці ---------- */
+.grid { width: 100%; border-collapse: collapse; font-size: 15px; background-color: #fff; }
+.grid th, .grid td { border: 1px solid #d5dce5; padding: 8px 11px; text-align: left; }
+.grid thead th { background-color: #1d3a63; color: #fff; font-weight: 600; }
+.grid tbody tr:nth-child(even) { background-color: #f6f9fc; }
+.center { text-align: center; }
+
+.props { border-collapse: collapse; font-size: 15px; margin-bottom: 8px; }
+.props th { text-align: left; padding: 6px 16px 6px 0; color: #55616f; font-weight: 600; vertical-align: top; }
+.props td { padding: 6px 0; }
+
+/* ---------- мітки тональності ---------- */
+.tag { display: inline-block; padding: 2px 9px; border-radius: 11px; font-size: 13px; font-weight: 600; }
+.tag-positive { background-color: #dcf0e2; color: #1d5b2c; }
+.tag-negative { background-color: #fbe2e2; color: #8c2020; }
+.muted { color: #76818f; font-size: 14px; }
+.body { margin: 12px 0; text-align: justify; }
+.empty { background-color: #fff; border: 1px dashed #c4ced9; border-radius: 8px; padding: 24px; text-align: center; }
+
+/* ---------- показники та діаграми ---------- */
+.stats { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 20px; }
+.stat {
+    flex: 1 1 170px; background-color: #fff; border: 1px solid #dde3ea;
+    border-radius: 8px; text-align: center; padding: 14px 10px; font-size: 14px; color: #55616f;
+}
+.stat .num { display: block; font-size: 27px; font-weight: 700; color: #2f66a8; }
+
+.bar { display: flex; height: 34px; border-radius: 6px; overflow: hidden; margin: 10px 0 6px; }
+.bar div { display: flex; align-items: center; justify-content: center; color: #fff; font-size: 13px; font-weight: 600; }
+.bar-pos { background-color: #2e8b57; }
+.bar-neg { background-color: #c0392b; }
+
+.mini-bar { display: inline-block; width: 110px; height: 10px; background-color: #f0d6d4; border-radius: 5px; overflow: hidden; vertical-align: middle; }
+.mini-bar div { height: 100%; background-color: #2e8b57; }
+
+/* ---------- підвал ---------- */
+.site-footer { background-color: #15283f; color: #a9bdd4; text-align: center; padding: 16px 0; font-size: 14px; }
+
+@media (max-width: 640px) {
+    .grid { font-size: 13px; }
+    .grid th, .grid td { padding: 6px; }
+}

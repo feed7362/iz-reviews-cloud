@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+{% block title %}Додати відгук — {{ app_title }}{% endblock %}
+{% block content %}
+
+<h1>Додати відгук</h1>
+
+<form class="card form" method="post">
+    <div class="row">
+        <label for="name">Ім’я та прізвище</label>
+        <input id="name" name="name" type="text" value="{{ form.get('name', '') }}"
+               placeholder="Олена Ковальчук" required>
+    </div>
+    <div class="row">
+        <label for="email">Електронна пошта</label>
+        <input id="email" name="email" type="email" value="{{ form.get('email', '') }}"
+               placeholder="you@example.com" required>
+    </div>
+    <div class="row">
+        <label for="category_id">Категорія</label>
+        <select id="category_id" name="category_id" required>
+            {% for c in categories %}
+                <option value="{{ c.id }}"
+                    {% if form.get('category_id')|string == c.id|string %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="row">
+        <label for="product">Товар</label>
+        <input id="product" name="product" type="text" value="{{ form.get('product', '') }}"
+               placeholder="Назва товару" required>
+    </div>
+    <div class="row">
+        <label for="rating">Оцінка</label>
+        <select id="rating" name="rating" required>
+            {% for v in [5, 4, 3, 2, 1] %}
+                <option value="{{ v }}" {% if form.get('rating')|string == v|string %}selected{% endif %}>{{ v }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="row">
+        <label for="body">Текст відгуку</label>
+        <textarea id="body" name="body" rows="6"
+                  placeholder="Опишіть враження від товару (англійською — модель навчена на англомовних відгуках)"
+                  required>{{ form.get('body', '') }}</textarea>
+    </div>
+    <div class="row row-check">
+        <input id="analyse" name="analyse" type="checkbox" value="1" checked>
+        <label for="analyse">Одразу проаналізувати тональність модулем ШІ</label>
+    </div>
+    <button class="primary" type="submit">Зберегти відгук</button>
+</form>
+
+{% endblock %}

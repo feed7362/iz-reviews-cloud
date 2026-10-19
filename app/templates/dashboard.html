@@ -1,0 +1,77 @@
+{% extends 'base.html' %}
+{% block title %}Аналітика — {{ app_title }}{% endblock %}
+{% block content %}
+
+<h1>Аналітика відгуків</h1>
+
+<div class="stats">
+    <div class="stat"><span class="num">{{ s.totals.reviews }}</span>відгуків</div>
+    <div class="stat"><span class="num">{{ s.totals.users }}</span>користувачів</div>
+    <div class="stat"><span class="num">{{ s.totals.analysed }}</span>проаналізовано</div>
+    <div class="stat"><span class="num">{{ s.totals.avg_rating or '—' }}</span>середня оцінка</div>
+</div>
+
+<section class="card">
+    <h2>Розподіл тональності</h2>
+    {% set pos = (s.by_sentiment | selectattr('sentiment', 'equalto', 'positive') | map(attribute='n') | sum) %}
+    {% set neg = (s.by_sentiment | selectattr('sentiment', 'equalto', 'negative') | map(attribute='n') | sum) %}
+    {% set tot = pos + neg %}
+    {% if tot %}
+        <div class="bar">
+            <div class="bar-pos" style="width: {{ (100 * pos / tot)|round(1) }}%">
+                позитивні {{ pos }}</div>
+            <div class="bar-neg" style="width: {{ (100 * neg / tot)|round(1) }}%">
+                негативні {{ neg }}</div>
+        </div>
+        <p class="muted">Частка позитивних: {{ (100 * pos / tot)|round(1) }}%</p>
+    {% else %}
+        <p class="muted">Ще немає проаналізованих відгуків.</p>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('main.analyse_all') }}">
+        <button class="primary" type="submit">Проаналізувати всі нові відгуки</button>
+    </form>
+</section>
+
+<section class="card">
+    <h2>За категоріями</h2>
+    <table class="grid">
+        <thead>
+        <tr><th>Категорія</th><th>Відгуків</th><th>Позитивних</th>
+            <th>Негативних</th><th>Середня оцінка</th><th>Частка позитивних</th></tr>
+        </thead>
+        <tbody>
+        {% for c in s.by_category %}
+            {% set t = c.positive + c.negative %}
+            <tr>
+                <td>{{ c.category }}</td>
+                <td class="center">{{ c.n }}</td>
+                <td class="center">{{ c.positive }}</td>
+                <td class="center">{{ c.negative }}</td>
+                <td class="center">{{ c.avg_rating or '—' }}</td>
+                <td>
+                    {% if t %}
+                        <div class="mini-bar">
+                            <div style="width: {{ (100 * c.positive / t)|round(1) }}%"></div>
+                        </div>
+                        <span class="muted">{{ (100 * c.positive / t)|round(0)|int }}%</span>
+                    {% else %}<span class="muted">—</span>{% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</section>
+
+<section class="card">
+    <h2>Стан модуля ШІ</h2>
+    <table class="props">
+        <tr><th>Хмарний сервіс Hugging Face</th>
+            <td>{{ 'налаштовано' if ai_status.hf_configured else 'токен не задано — працює резервна модель' }}</td></tr>
+        <tr><th>Модель Hugging Face</th><td>{{ ai_status.hf_model }}</td></tr>
+        <tr><th>Локальна резервна модель</th>
+            <td>{{ 'доступна' if ai_status.local_available else 'відсутня' }}</td></tr>
+    </table>
+</section>
+
+{% endblock %}
