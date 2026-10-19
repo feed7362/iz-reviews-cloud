@@ -72,6 +72,7 @@ def validate_csrf():
 
 # ------------------------------------------------ IP-адреса та ліміти
 MAX_KEYS = int(os.environ.get('RATE_MAX_KEYS', '10000'))
+LOGIN_MAX_KEYS = int(os.environ.get('LOGIN_MAX_KEYS', '2000'))
 
 
 def client_ip():
@@ -111,30 +112,39 @@ def _prune(store, window, now):
         store.pop(k, None)
 
 
-def _check(store, key, limit, window):
-    """Чи вичерпано ліміт. Нічого не записує.
+def _evict(store, cap):
+    """Звільняє місце, витісняючи записи з НАЙМЕНШОЮ кількістю звернень.
 
-    Якщо сховище переповнене живими записами, новий ключ вважається
-    обмеженим (відмова на користь безпеки) - записи в межах вікна не
-    витісняються. Інакше зловмисник міг би заповнити сховище й у такий
-    спосіб скинути чужий (або власний) лічильник.
+    Відмовляти новим ключам при переповненні не можна: тоді зловмисник,
+    заповнивши сховище, заблокував би вхід усім, зокрема адміністраторові.
+    Але й витісняти будь-що підряд не можна: так знімалося б чуже блокування.
+
+    Компроміс: першими зникають записи з найменшою кількістю звернень. Той,
+    хто вичерпав ліміт, має їх найбільше, тому витісняється останнім, а
+    одноразові записи, якими заповнюють сховище, зникають першими.
     """
+    if len(store) <= cap:
+        return
+    order = sorted(store, key=lambda k: (len(store[k]), store[k][-1]))
+    for k in order[:len(store) - cap]:
+        store.pop(k, None)
+
+
+def _check(store, key, limit, window):
+    """Чи вичерпано ліміт для ключа. Нічого не записує."""
     now = time.time()
     _prune(store, window, now)
     recent = [t for t in store.get(key, []) if now - t < window]
     if recent:
         store[key] = recent
-    if key not in store and len(store) >= MAX_KEYS:
-        return True
     return len(recent) >= limit
 
 
-def _record(store, key, window):
+def _record(store, key, window, cap):
     now = time.time()
     _prune(store, window, now)
-    if key not in store and len(store) >= MAX_KEYS:
-        return                      # сховище заповнене живими записами
     store[key].append(now)
+    _evict(store, cap)
 
 
 def too_many(key, limit, window):
@@ -143,7 +153,7 @@ def too_many(key, limit, window):
 
 
 def record_attempt(key):
-    _record(_api_hits, key, RATE_WINDOW)
+    _record(_api_hits, key, RATE_WINDOW, MAX_KEYS)
 
 
 def rate_limited(view):
@@ -154,7 +164,7 @@ def rate_limited(view):
         if _check(_api_hits, key, RATE_LIMIT, RATE_WINDOW):
             return jsonify({'error': 'Перевищено ліміт запитів, спробуйте пізніше',
                             'limit': RATE_LIMIT, 'window_seconds': RATE_WINDOW}), 429
-        _record(_api_hits, key, RATE_WINDOW)
+        _record(_api_hits, key, RATE_WINDOW, MAX_KEYS)
         return view(*args, **kwargs)
     return wrapper
 
@@ -169,7 +179,9 @@ def login_blocked():
 
 
 def record_failed_login():
-    _record(_login_hits, 'login:' + client_ip(), LOGIN_WINDOW)
+    # Окремий, менший ліміт обсягу: невдалі входи - рідкісна подія, тож
+    # сховище лічильників входу не має конкурувати за місце з трафіком API.
+    _record(_login_hits, 'login:' + client_ip(), LOGIN_WINDOW, LOGIN_MAX_KEYS)
 
 
 def admin_required(view):

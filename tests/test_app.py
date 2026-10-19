@@ -250,3 +250,45 @@ def test_ipv6_addresses_share_a_64_bucket():
     assert len(keys) == 1
     with app.test_request_context(environ_base={'REMOTE_ADDR': '203.0.113.7'}):
         assert client_ip() == '203.0.113.7'
+
+
+def test_store_overflow_does_not_lock_out_new_clients(client, monkeypatch):
+    """Переповнення сховища не має блокувати тих, хто ліміту не вичерпав."""
+    from app import security
+    import time as _t
+    monkeypatch.setattr(security, 'MAX_KEYS', 5)
+    security._api_hits.clear()
+    for i in range(50):                       # заповнюємо «сміттєвими» ключами
+        security._api_hits['api:10.0.0.%d' % i] = [_t.time()]
+    r = client.post('/api/analyse', json={'text': 'A genuinely nice product'})
+    assert r.status_code == 200               # не 429
+    security._api_hits.clear()
+
+
+def test_eviction_keeps_blocked_keys(monkeypatch):
+    """Витіснення прибирає одноразові записи, а не того, хто вичерпав ліміт."""
+    from app import security
+    import time as _t
+    now = _t.time()
+    store = security.defaultdict(list)
+    store['api:attacker'] = [now] * 20        # вичерпав ліміт
+    for i in range(50):
+        store['api:filler%d' % i] = [now]     # по одному зверненню
+    security._evict(store, 5)
+    assert len(store) == 5
+    assert 'api:attacker' in store            # збережено саме його
+
+
+def test_admin_can_log_in_while_store_is_full(client, monkeypatch):
+    """Адміністратор має увійти навіть коли сховище переповнене."""
+    from app import security
+    import time as _t
+    monkeypatch.setenv('ADMIN_TOKEN', 'tok')
+    monkeypatch.setattr(security, 'LOGIN_MAX_KEYS', 5)
+    security._login_hits.clear()
+    for i in range(50):
+        security._login_hits['login:10.0.0.%d' % i] = [_t.time()]
+    assert post(client, '/login', password='tok').status_code == 302
+    with client.session_transaction() as sess:
+        sess.pop('is_admin', None)
+    security._login_hits.clear()
