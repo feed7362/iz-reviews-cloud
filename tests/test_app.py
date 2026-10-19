@@ -362,3 +362,22 @@ def test_ai_falls_back_to_local_when_budget_exceeded(monkeypatch):
     assert called == []                      # хмарний сервіс не викликався
     assert res['model'].startswith('local:')
     assert res['sentiment'] in {'positive', 'negative'}
+
+
+def test_login_429_has_retry_after_and_no_blocking_sleep(client, monkeypatch):
+    """Під тиском повертаємо 429 із Retry-After, не блокуючи робітника."""
+    import time as _t
+    from app import security
+    monkeypatch.setenv('ADMIN_TOKEN', 'tok')
+    monkeypatch.setattr(security, 'GLOBAL_LOGIN_LIMIT', 3)
+    security._login_hits.clear()
+    security._global.clear()
+    security._global['login'] = [_t.time()] * 50
+    monkeypatch.setattr(security, 'client_ip', lambda: '198.51.100.8')
+    started = _t.time()
+    r = post(client, '/login', password='wrong')
+    assert r.status_code == 429
+    assert r.headers.get('Retry-After')
+    assert _t.time() - started < 0.5          # без затримки на сервері
+    security._login_hits.clear()
+    security._global.clear()

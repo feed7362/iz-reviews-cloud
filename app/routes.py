@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 """Маршрути вебзастосунку: обробка запитів користувачів."""
-import time
-
 from flask import (Blueprint, render_template, request, redirect, url_for,
-                   flash, jsonify, abort, session)
+                   flash, jsonify, abort, session, make_response)
 from . import db, ai
 from .security import (admin_required, rate_limited, check_password,
                        login_blocked, login_under_pressure, record_failed_login,
                        ai_budget_exceeded, safe_next)
+from .security import LOGIN_WINDOW
 
 bp = Blueprint('main', __name__)
 
@@ -137,9 +136,13 @@ def login():
 
         record_failed_login()
         if login_under_pressure():
-            time.sleep(1.0)        # сповільнюємо підбір під час масових спроб
+            # Жодної затримки на сервері: time.sleep блокує робітника gunicorn,
+            # тож кілька невдалих входів підвісили б застосунок усім. Клієнтові
+            # повідомляємо про паузу заголовком Retry-After.
             flash('Забагато невдалих спроб входу. Спробуйте пізніше.', 'error')
-            return render_template('login.html'), 429
+            resp = make_response(render_template('login.html'), 429)
+            resp.headers['Retry-After'] = str(LOGIN_WINDOW)
+            return resp
         flash('Невірний пароль.', 'error')
     return render_template('login.html')
 
