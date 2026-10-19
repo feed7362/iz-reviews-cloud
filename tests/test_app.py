@@ -80,6 +80,19 @@ def test_dsn_requires_env(monkeypatch):
 
 
 # ------------------------------------------------------------ безпека
+def token_of(client):
+    """Отримує чинний CSRF-токен із сесії тестового клієнта."""
+    client.get('/login')
+    with client.session_transaction() as sess:
+        return sess['csrf_token']
+
+
+def post(client, path, **data):
+    """POST із коректним CSRF-токеном - як це робить браузер із форми."""
+    data['csrf_token'] = token_of(client)
+    return client.post(path, data=data)
+
+
 def test_mask_email():
     from app.security import mask_email
     assert mask_email('olena@example.com') == 'o***@example.com'
@@ -89,18 +102,16 @@ def test_mask_email():
 
 def test_delete_requires_admin(client):
     """Видалення відгуку анонімним користувачем має бути заборонене."""
-    r = client.post('/review/1/delete')
-    assert r.status_code == 403
+    assert post(client, '/review/1/delete').status_code == 403
 
 
 def test_analyse_all_requires_admin(client):
-    r = client.post('/analyse-all')
-    assert r.status_code == 403
+    assert post(client, '/analyse-all').status_code == 403
 
 
 def test_login_rejects_wrong_password(client, monkeypatch):
     monkeypatch.setenv('ADMIN_TOKEN', 'correct-token')
-    r = client.post('/login', data={'password': 'wrong'})
+    r = post(client, '/login', password='wrong')
     assert r.status_code == 200          # лишаємось на сторінці входу
     with client.session_transaction() as sess:
         assert not sess.get('is_admin')
@@ -108,7 +119,7 @@ def test_login_rejects_wrong_password(client, monkeypatch):
 
 def test_login_accepts_correct_password(client, monkeypatch):
     monkeypatch.setenv('ADMIN_TOKEN', 'correct-token')
-    r = client.post('/login', data={'password': 'correct-token'})
+    r = post(client, '/login', password='correct-token')
     assert r.status_code == 302
     with client.session_transaction() as sess:
         assert sess.get('is_admin') is True
@@ -118,5 +129,41 @@ def test_login_accepts_correct_password(client, monkeypatch):
 def test_admin_disabled_without_token(client, monkeypatch):
     """Якщо ADMIN_TOKEN не заданий, вхід неможливий, а дії заблоковано."""
     monkeypatch.delenv('ADMIN_TOKEN', raising=False)
-    assert client.post('/login', data={'password': ''}).status_code == 200
-    assert client.post('/review/1/delete').status_code == 403
+    assert post(client, '/login', password='').status_code == 200
+    assert post(client, '/review/1/delete').status_code == 403
+
+
+# --------------------------------------------- CSRF та відкрите перенаправлення
+def test_safe_next_allows_relative_path():
+    from app.security import safe_next
+    assert safe_next('/dashboard') == '/dashboard'
+
+
+def test_safe_next_blocks_external_and_tricks():
+    from app.security import safe_next
+    for bad in ('https://evil.example.com', '//evil.example.com',
+                '/\\evil.example.com', 'http://evil', 'dashboard', '', None):
+        assert safe_next(bad) is None
+
+
+def test_post_without_csrf_token_rejected(client):
+    """Форма без токена CSRF має відхилятися."""
+    r = client.post('/login', data={'password': 'x'})
+    assert r.status_code == 400
+
+
+def test_post_with_csrf_token_accepted(client, monkeypatch):
+    monkeypatch.setenv('ADMIN_TOKEN', 'tok')
+    client.get('/login')                       # отримати токен у сесії
+    with client.session_transaction() as sess:
+        token = sess['csrf_token']
+    r = client.post('/login', data={'password': 'tok', 'csrf_token': token})
+    assert r.status_code == 302
+    with client.session_transaction() as sess:
+        sess.pop('is_admin', None)
+
+
+def test_api_does_not_require_csrf(client):
+    """JSON API не використовує куки сесії, тож токен там не потрібен."""
+    r = client.post('/api/analyse', json={'text': 'Really good stuff here'})
+    assert r.status_code in (200, 429)

@@ -5,6 +5,7 @@
 <h1>Вхід адміністратора</h1>
 
 <form class="card form" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <p class="muted">Дії, що змінюють дані (видалення відгуків, масовий аналіз),
         доступні лише адміністратору.</p>
     <div class="row">

@@ -5,6 +5,7 @@
 <h1>Додати відгук</h1>
 
 <form class="card form" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="row">
         <label for="name">Ім’я та прізвище</label>
         <input id="name" name="name" type="text" value="{{ form.get('name', '') }}"

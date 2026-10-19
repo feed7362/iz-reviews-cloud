@@ -30,6 +30,7 @@
 
     {% if is_admin %}
     <form method="post" action="{{ url_for('main.analyse_all') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button class="primary" type="submit">Проаналізувати всі нові відгуки</button>
     </form>
     {% else %}

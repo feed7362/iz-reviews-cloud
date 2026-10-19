@@ -17,6 +17,7 @@
             <a href="{{ url_for('main.dashboard') }}">Аналітика</a>
             {% if is_admin %}
                 <form class="inline-form" method="post" action="{{ url_for('main.logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button class="link-btn" type="submit">Вийти</button>
                 </form>
             {% else %}

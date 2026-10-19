@@ -27,6 +27,7 @@
 
     <div class="actions">
         <form method="post" action="{{ url_for('main.analyse_review', review_id=r.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="primary" type="submit">
                 {% if r.sentiment %}Проаналізувати повторно{% else %}Проаналізувати{% endif %}
             </button>
@@ -34,6 +35,7 @@
         {% if is_admin %}
         <form method="post" action="{{ url_for('main.remove_review', review_id=r.id) }}"
               onsubmit="return confirm('Видалити відгук #{{ r.id }}?');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="danger" type="submit">Видалити</button>
         </form>
         {% endif %}

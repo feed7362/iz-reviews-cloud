@@ -3,7 +3,8 @@
 from flask import (Blueprint, render_template, request, redirect, url_for,
                    flash, jsonify, abort, session)
 from . import db, ai
-from .security import admin_required, rate_limited, check_password
+from .security import (admin_required, rate_limited, check_password,
+                       login_rate_limited, safe_next)
 
 bp = Blueprint('main', __name__)
 
@@ -115,12 +116,13 @@ def analyse_all():
 
 
 @bp.route('/login', methods=['GET', 'POST'])
+@login_rate_limited
 def login():
     if request.method == 'POST':
         if check_password(request.form.get('password', '')):
             session['is_admin'] = True
             flash('Вхід виконано.', 'ok')
-            return redirect(request.args.get('next') or url_for('main.index'))
+            return redirect(safe_next(request.args.get('next')) or url_for('main.index'))
         flash('Невірний пароль.', 'error')
     return render_template('login.html')
 
